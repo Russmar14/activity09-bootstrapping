@@ -6,3 +6,112 @@ output: github_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+```{r loading packages}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+```
+```{r task 3} 
+  # Set a random seed value so we can obtain the same "random" results
+  set.seed(2023)
+
+  # Create a data frame/tibble named sim_dat
+  sim_dat <- tibble(
+  #first variable generating 20 obs between -5 and 5, uniformly distributed
+    x1 = runif(20, -5, 5),
+  # same but between 1 and 100
+    x2 = runif(20, 0, 100),
+  # this time it's a binomial disriution with 20 values, 50/50 shot of 0/1
+    x3 = rbinom(20, 1, 0.5)
+    )
+#set coefficients
+  b0 <- 2
+  b1 <- 0.25
+  b2 <- -0.5
+  b3 <- 1
+  sigma <- 1.5
+
+  errors <- rnorm(20, 0, sigma)
+
+  sim_dat <- sim_dat %>% 
+    mutate(
+      y = b0 + b1*x1 + b2*x2 + b3*x3 + errors,
+      x3 = case_when(
+        x3 == 0 ~ "No",
+        TRUE ~ "Yes"
+        )
+      )
+#Let's create a comparison of variables
+sim_dat %>% 
+  ggpairs()
+  
+```
+
+Here, y=b0+b1×x1+b2×x2+b3×x3+errors represent the true population level model, for which we know the coefficients and error (normal dist random error w/sd of 1.5 (aka sigma)).
+
+We can see that x1 is barely correlated with y. x2 is very highly negatively correlated with y and x3 is close to 50/50. These all fit our earlier understanding based on the code that created the data. 
+
+```{r task 4}
+  mlr_fit <- linear_reg() %>%
+    set_mode("regression") %>% 
+    set_engine("lm") %>% 
+    fit(y ~ x1 + x2 + x3, data = sim_dat)
+
+  # Also include the confidence intervals for our estimated slope parameters
+  tidy(mlr_fit, conf.int = TRUE)
+```
+These results show that our estimates are very close to the actual population model underlying our data. Note the p-values and confidence intervals, as well as estimates. 
+
+## Bootstrapping with our dataset
+
+```{r task 5}
+#Bootstrapping
+  # Set a random seed value so we can obtain the same "random" results
+  set.seed(631)
+
+  # Generate the 2000 bootstrap samples
+  boot_samps <- sim_dat %>% 
+    bootstraps(times = 2000)
+
+  boot_samps
+```
+
+
+```{r fit to bootstraps}
+  # Create a function that fits a fixed MLR model to one split dataset
+  fit_mlr_boots <- function(split) {
+    lm(y ~ x1 + x2 + x3, data = analysis(split))
+  }
+
+  # Fit the model to each split and store the information
+  # Also, obtain the tidy model information
+  boot_models <- boot_samps %>% 
+    mutate(
+      model = map(splits, fit_mlr_boots),
+      coef_info = map(model, tidy)
+      )
+
+  boots_coefs <- boot_models %>% 
+    unnest(coef_info)
+
+  boots_coefs
+  
+#now set confidence level 
+  boot_int <- int_pctl(boot_models, statistics = coef_info, alpha = 0.05)
+  boot_int
+  
+#visualizing variability in estimates
+    ggplot(boots_coefs, aes(x = estimate)) +
+    geom_histogram(bins = 30) +
+    facet_wrap( ~ term, scales = "free") +
+    geom_vline(data = boot_int, aes(xintercept = .lower), col = "blue") +
+    geom_vline(data = boot_int, aes(xintercept = .upper), col = "blue")
+```
+These estimates all include our population level model values for the data. These results are solid. 
+
+
+
+
+
+
